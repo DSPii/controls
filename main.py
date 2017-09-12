@@ -3,9 +3,9 @@
 # Glue logic for controlling drone and triggering radio measurement
 
 from dronekit import VehicleMode, connect, Command
-from nav_commands import goto_absolute_nea, takeoff
+from nav_commands import goto_absolute_nea, takeoff, delay
 from pymavlink import mavutil
-import log_test
+from radio import log_test
 import logging
 import time
 import sys
@@ -24,7 +24,7 @@ handler.setFormatter(formatter)
 
 connections = []
 # try to connect to simulator
-connections.append('tcp:localhost:14550')
+connections.append('tcp:localhost:14551')
 # try to connect to pixhawk over serial port
 preferred_list=['*FTDI*', "*Arduino_Mega_2560*", "*3D_Robotics*", "*USB_to_UART*", '*PX4*', '*FMU*']
 connections.append(str(mavutil.auto_detect_serial(preferred_list)[0]))
@@ -40,31 +40,36 @@ else:
 
 # --------------------- Load mission --------------------------
 
+# @vehicle.on_message('*')
 @vehicle.on_message('MISSION_ITEM_REACHED')
 def on_waypoint(self, name, message):
+    # if not name in ('VIBRATION', 'EKF_STATUS_REPORT', 'ATTITUDE', 'SYSTEM_TIME', 'TERRAIN_REPORT', 'BATTERY_STATUS', 'HWSTATUS', 'AHRS', 'VFR_HUD', 'RC_CHANNELS', 'GLOBAL_POSITION_INT', 'NAV_CONTROLLER_OUTPUT', 'POWER_STATUS', 'MEMINFO', 'GPS_RAW_INT', 'SYS_STATUS', 'HEARTBEAT', 'SCALED_IMU', 'SCALED_PRESSURE', 'RAW_IMU', 'SIMSTATE', 'AHRS2', 'AHRS3', 'RC_CHANNELS_RAW', 'SCALED_IMU2', 'LOCAL_POSITION_NED', 'SERVO_OUTPUT_RAW', 'MISSION_CURRENT', 'SENSOR_OFFSETS', 'MISSION_ITEM'):
+        # print "*****", name, ":", message
     print("Reached waypoint #{}. Taking a measurement".format(message.seq - 1))
-    log_test.measure('waypoint_{}.dat'.format(message.seq - 1))
+    log_test.measure('waypoint_{}.dat'.format(message.seq - 1)).run()
 
-    if message.seq == self.commands.count:
-        logging.info("Mission complete, returning to land")
-        vehicle.mode = VehicleMode('RTL')
-        vehicle.close()
-        sys.exit()
+    # if message.seq == self.commands.count:
+    #     logging.info("Mission complete, returning to land")
+    #     vehicle.mode = VehicleMode('RTL')
+    #     vehicle.close()
+    #     sys.exit()
 
 print("Starting mission")
 
-altitude = 5
+altitude = .5
 
 vehicle.mode = VehicleMode("GUIDED")
 vehicle.commands.clear()
 print("Building mission at altitude {}".format(altitude))
 # ArduCopter burns the first command for whatever reason - https://discuss.dronekit.io/t/solved-dronekit-plane-takeoff/966/2
-vehicle.commands.add(goto_absolute_nea(0, 0, 0))
 # add takeoff command
+vehicle.commands.add(goto_absolute_nea(0, 0, 0))
 vehicle.commands.add(takeoff(altitude))
 with open('mission.txt') as commands:
     for lat, lon in (latlon.split(' ') for latlon in commands):
         vehicle.commands.add(goto_absolute_nea(float(lat), float(lon), altitude))
+        vehicle.commands.add(delay(10))
+
 
 vehicle.commands.upload()
 
@@ -82,7 +87,7 @@ while not vehicle.armed:
     time.sleep(1)
 
 # initiating takeoff manually is necessary for simulator where we can't set throttle with a controller
-vehicle.simple_takeoff(1)
+vehicle.simple_takeoff(.5)
 vehicle.mode = VehicleMode("AUTO")
 
 vehicle.commands.next = 0
